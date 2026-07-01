@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-スプリント管理システムの自動セットアップスクリプト
-Milestones と Labels を一括作成します
+スプリント管理システムの完全自動セットアップスクリプト
+Milestones、Labels、Project ボードを一括作成します
 """
 
 import subprocess
 import json
 import sys
-from datetime import datetime, timedelta
+import time
 
 # リポジトリ情報
 REPO_OWNER = "ryutakawabe-prog"
@@ -99,12 +99,13 @@ def create_milestones():
         output, code = run_gh_command(args)
         
         if code == 0:
-            print(f"    ✅ 作成完了\n")
+            print(f"    ✅ 作成完了")
             created += 1
         else:
-            print(f"    ⚠️  作成失敗\n")
+            print(f"    ⚠️  作成失敗")
+        time.sleep(0.5)  # API レート制限回避
     
-    print(f"✅ {created}/{len(MILESTONES)} 個の Milestones を作成しました\n")
+    print(f"\n✅ {created}/{len(MILESTONES)} 個の Milestones を作成しました\n")
     return created
 
 
@@ -127,23 +128,75 @@ def create_labels():
         output, code = run_gh_command(args)
         
         if code == 0:
-            print(f"    ✅ 作成完了\n")
+            print(f"    ✅ 作成完了")
             created += 1
         else:
-            print(f"    ⚠️  作成失敗\n")
+            print(f"    ⚠️  作成失敗")
+        time.sleep(0.5)  # API レート制限回避
     
-    print(f"✅ {created}/{len(LABELS)} 個の Labels を作成しました\n")
+    print(f"\n✅ {created}/{len(LABELS)} 個の Labels を作成しました\n")
     return created
+
+
+def create_project():
+    """Project V2 ボード を作成"""
+    print("\n📊 Project ボードを作成中...\n")
+    
+    # GraphQL を使用して Project V2 を作成
+    query = """
+    mutation {
+      createProjectV2(input: {
+        ownerId: "MDEyOk9yZ2FuaXphdGlvbjI3MzAzNjk4NQ=="
+        title: "Sprint Backlog"
+        repositoryId: "R_kgDOTKpVEw"
+      }) {
+        projectV2 {
+          id
+          title
+          url
+        }
+      }
+    }
+    """
+    
+    print("  Creating: Sprint Backlog")
+    
+    # REST API を使用してシンプルに作成
+    args = [
+        "api", 
+        "--input", "-",
+        "graphql"
+    ]
+    
+    try:
+        result = subprocess.run(
+            ["gh"] + args[:2] + ["-"],
+            input=query,
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        if result.returncode == 0:
+            print(f"    ✅ Project ボード作成完了")
+            return True
+        else:
+            print(f"    ⚠️  Project ボード作成失敗（手動作成が必要です）")
+            return False
+    except Exception as e:
+        print(f"    ⚠️  エラー: {str(e)}")
+        return False
 
 
 def main():
     """メイン処理"""
-    print("=" * 60)
-    print("🚀 スプリント管理システム セットアップ")
-    print("=" * 60)
+    print("=" * 70)
+    print("🚀 スプリント管理システム 完全自動セットアップ")
+    print("=" * 70)
     print(f"\n📦 リポジトリ: {REPO}")
     print(f"📅 Milestones: {len(MILESTONES)} 個")
     print(f"🏷️  Labels: {len(LABELS)} 個")
+    print(f"📊 Project ボード: 1 個")
     
     # 確認
     response = input("\n本当に作成しますか？ (y/n): ")
@@ -157,17 +210,27 @@ def main():
     # Labels 作成
     label_count = create_labels()
     
+    # Project 作成
+    project_created = create_project()
+    
     # 結果表示
-    print("=" * 60)
+    print("=" * 70)
     print("✅ セットアップが完了しました！")
-    print("=" * 60)
+    print("=" * 70)
     print(f"\n📊 作成結果:")
     print(f"  📅 Milestones: {milestone_count}/{len(MILESTONES)}")
     print(f"  🏷️  Labels: {label_count}/{len(LABELS)}")
+    print(f"  📊 Project: {'✅' if project_created else '⚠️  手動作成が必要'}")
+    
     print(f"\n📋 次のステップ:")
-    print(f"  1. https://github.com/{REPO}/projects を開く")
-    print(f"  2. New Project で 'Sprint Backlog' を作成")
-    print(f"  3. Issues を作成してボードに追加")
+    if not project_created:
+        print(f"  1. https://github.com/{REPO}/projects を開く")
+        print(f"  2. New Project で 'Sprint Backlog' を作成（テンプレート: Board）")
+    else:
+        print(f"  1. Project ボード: https://github.com/{REPO}/projects")
+    print(f"  2. Issues を作成してボードに追加")
+    print(f"  3. ラベルと Milestone を設定")
+    
     print(f"\n🎯 詳細: docs/SPRINT_RULES.md を参照\n")
 
 
