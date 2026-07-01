@@ -62,19 +62,27 @@ LABELS = [
 ]
 
 
-def run_gh_command(args):
+def run_gh_command(cmd, data=None):
     """GitHub CLI コマンドを実行"""
     try:
-        result = subprocess.run(
-            ["gh"] + args,
-            capture_output=True,
-            text=True,
-            check=True
-        )
+        if data:
+            result = subprocess.run(
+                cmd,
+                input=json.dumps(data),
+                capture_output=True,
+                text=True,
+                check=True
+            )
+        else:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
         return result.stdout, result.returncode
     except subprocess.CalledProcessError as e:
-        print(f"❌ エラー: {e.stderr}")
-        return None, e.returncode
+        return e.stderr, e.returncode
     except FileNotFoundError:
         print("❌ エラー: GitHub CLI (gh) がインストールされていません")
         print("👉 インストール: https://cli.github.com/")
@@ -89,21 +97,49 @@ def create_milestones():
     for milestone in MILESTONES:
         print(f"  Creating: {milestone['title']} (Due: {milestone['due_date']})")
         
-        args = [
-            "api", "repos", REPO_OWNER, REPO_NAME, "milestones",
-            "-X", "POST",
-            "-f", f"title={milestone['title']}",
-            "-f", f"due_on={milestone['due_date']}T23:59:59Z",
-        ]
+        # GraphQL クエリ
+        query = {
+            "query": f"""
+            mutation {{
+              createMilestone(input: {{
+                repositoryId: "R_kgDOTKpVEw"
+                title: "{milestone['title']}"
+                dueOn: "{milestone['due_date']}T23:59:59Z"
+              }}) {{
+                milestone {{
+                  id
+                  title
+                }}
+              }}
+            }}
+            """
+        }
         
-        output, code = run_gh_command(args)
+        cmd = ["gh", "api", "graphql", "-i", "-"]
+        output, code = run_gh_command(cmd, query)
         
-        if code == 0:
+        if code == 0 and "errors" not in output:
             print(f"    ✅ 作成完了")
             created += 1
         else:
-            print(f"    ⚠️  作成失敗")
-        time.sleep(0.5)  # API レート制限回避
+            # REST API で再試行
+            cmd = [
+                "gh", "api", 
+                f"repos/{REPO_OWNER}/{REPO_NAME}/milestones",
+                f"--input=-"
+            ]
+            data = {
+                "title": milestone['title'],
+                "due_on": f"{milestone['due_date']}T23:59:59Z"
+            }
+            output, code = run_gh_command(cmd, data)
+            if code == 0:
+                print(f"    ✅ 作成完了")
+                created += 1
+            else:
+                print(f"    ⚠️  作成失敗")
+        
+        time.sleep(0.3)
     
     print(f"\n✅ {created}/{len(MILESTONES)} 個の Milestones を作成しました\n")
     return created
@@ -117,22 +153,27 @@ def create_labels():
     for label in LABELS:
         print(f"  Creating: {label['name']} (Color: {label['color']})")
         
-        args = [
-            "api", "repos", REPO_OWNER, REPO_NAME, "labels",
-            "-X", "POST",
-            "-f", f"name={label['name']}",
-            "-f", f"color={label['color']}",
-            "-f", f"description={label['description']}",
+        cmd = [
+            "gh", "api",
+            f"repos/{REPO_OWNER}/{REPO_NAME}/labels",
+            "--input", "-"
         ]
         
-        output, code = run_gh_command(args)
+        data = {
+            "name": label['name'],
+            "color": label['color'],
+            "description": label['description']
+        }
+        
+        output, code = run_gh_command(cmd, data)
         
         if code == 0:
             print(f"    ✅ 作成完了")
             created += 1
         else:
             print(f"    ⚠️  作成失敗")
-        time.sleep(0.5)  # API レート制限回避
+        
+        time.sleep(0.3)
     
     print(f"\n✅ {created}/{len(LABELS)} 個の Labels を作成しました\n")
     return created
@@ -141,50 +182,27 @@ def create_labels():
 def create_project():
     """Project V2 ボード を作成"""
     print("\n📊 Project ボードを作成中...\n")
-    
-    # GraphQL を使用して Project V2 を作成
-    query = """
-    mutation {
-      createProjectV2(input: {
-        ownerId: "MDEyOk9yZ2FuaXphdGlvbjI3MzAzNjk4NQ=="
-        title: "Sprint Backlog"
-        repositoryId: "R_kgDOTKpVEw"
-      }) {
-        projectV2 {
-          id
-          title
-          url
-        }
-      }
-    }
-    """
-    
     print("  Creating: Sprint Backlog")
     
-    # REST API を使用してシンプルに作成
-    args = [
-        "api", 
-        "--input", "-",
-        "graphql"
+    # REST API で Projects 作成
+    cmd = [
+        "gh", "api",
+        f"repos/{REPO_OWNER}/{REPO_NAME}/projects",
+        "--input", "-"
     ]
     
-    try:
-        result = subprocess.run(
-            ["gh"] + args[:2] + ["-"],
-            input=query,
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        
-        if result.returncode == 0:
-            print(f"    ✅ Project ボード作成完了")
-            return True
-        else:
-            print(f"    ⚠️  Project ボード作成失敗（手動作成が必要です）")
-            return False
-    except Exception as e:
-        print(f"    ⚠️  エラー: {str(e)}")
+    data = {
+        "name": "Sprint Backlog",
+        "body": "スプリントバックログの Kanban ボード"
+    }
+    
+    output, code = run_gh_command(cmd, data)
+    
+    if code == 0:
+        print(f"    ✅ Project ボード作成完了")
+        return True
+    else:
+        print(f"    ⚠️  Project ボード作成失敗（手動作成が必要です）")
         return False
 
 
